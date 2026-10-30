@@ -1,0 +1,21 @@
+{
+  "task_name": "示例-用户表对比",
+  "source_a": {
+    "host": "192.168.1.10",
+    "port": 3306,
+    "user": "readonly",
+    "password": "password_a",
+    "database": "app_db"
+  },
+  "source_b": {
+    "host": "192.168.1.20",
+    "port": 3306,
+    "user": "readonly",
+    "password": "password_b",
+    "database": "app_db"
+  },
+  "sql_a": "SELECT id, name, email, status, update_time FROM user WHERE env = 'prod'",
+  "sql_b": "SELECT id, name, email, status, update_time FROM user WHERE env = 'staging'",
+  "key_field": "id",
+  "fixed_filters": ["update_time"]
+}

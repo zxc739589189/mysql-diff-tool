@@ -1,0 +1,77 @@
+name: 打包桌面应用
+
+# 推送到 main/master、打 v* 标签、或手动触发时自动构建
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  # ───────────── Windows exe ─────────────
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: PyInstaller 打包
+        run: pyinstaller --noconfirm --clean MySQLDiffTool.spec
+
+      - name: 上传 Windows exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: MySQLDiffTool-windows
+          path: dist/MySQLDiffTool.exe
+
+  # ───────────── macOS app ─────────────
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装依赖
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install -r requirements.txt pyinstaller
+
+      - name: PyInstaller 打包
+        run: pyinstaller --noconfirm --clean MySQLDiffTool.spec
+
+      - name: 压缩 .app
+        run: ditto -c -k --sequesterRsrc --keepParent dist/MySQLDiffTool.app dist/MySQLDiffTool-macos.zip
+
+      - name: 上传 macOS app
+        uses: actions/upload-artifact@v4
+        with:
+          name: MySQLDiffTool-macos
+          path: dist/MySQLDiffTool-macos.zip
+
+  # ───────────── 打 tag 时自动发布 Release ─────────────
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+
+      - name: 发布 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            MySQLDiffTool-windows/MySQLDiffTool.exe
+            MySQLDiffTool-macos/MySQLDiffTool-macos.zip
