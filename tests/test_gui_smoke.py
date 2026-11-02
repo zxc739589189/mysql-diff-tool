@@ -100,16 +100,19 @@ check("固定过滤生效（无差异 key）", tab2._result.stats.diff_keys == 0
 long_val = "v" * 500
 tab2._on_query_done((["id", "v"], [(1, long_val)], ["id", "v"], [(1, long_val + "y")]))
 tab2.result_filter.setCurrentIndex(0)
-check("显示不截断", tab2.table.item(0, 2).text() == long_val)
+check("显示不截断", any(
+    tab2.table.item(i, 2).text() == long_val for i in range(tab2.table.rowCount())))
 tab2.table.selectAll()
 copied_long = tab2.copy_selection()
 check("复制为完整值不截断", long_val in copied_long and "…" not in copied_long)
-# 「仅 A 存在」整行摘要也不截断
+# 「仅 A 存在」整行摘要也不截断(显式指定 key=id,使两侧 key 对不上)
+tab2.key_edit.setText("id")
 tab2._on_query_done((["id", "v"], [(9, long_val)], ["id", "v"], [(1, "x")]))
 tab2.result_filter.setCurrentIndex(3)  # 仅 A 存在
 tab2.table.selectAll()
 copied_digest = tab2.copy_selection()
 check("整行摘要不截断", long_val in copied_digest)
+tab2.key_edit.setText("")
 
 # ── 对比结论模块(不一致 key 数量 + 列表 + 一致数量)──
 tab2._on_query_done((cols, ra, cols, rb))  # 恢复 3 产品数据集

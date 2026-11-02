@@ -105,16 +105,25 @@ def _index_rows(
 
 
 def resolve_compare_key(
-    cols_a: Sequence[str], cols_b: Sequence[str], key_field: str
+    cols_a: Sequence[str],
+    cols_b: Sequence[str],
+    key_field: str,
+    rows_a: Optional[Sequence[tuple]] = None,
+    rows_b: Optional[Sequence[tuple]] = None,
 ) -> str:
-    """确定对齐 key。
+    """确定对齐方式。
 
-    - 填 ``(行号)``（或 ``行号``）: 按行顺序对齐，不需要任何 key 列；
-    - 留空: 取 A 结果第一列；
+    - 填 ``(行号)``（或全角 ``（行号）``）: 按行顺序对齐，不需要任何 key 列；
+    - **留空且两侧各只有 1 行: 单行直接对比，无需 key**；
+    - 留空（多行）: 取 A 结果第一列作为 key；
     - 否则校验该列在两侧结果中都存在。
     """
     if (key_field or "").strip() in _ROW_NUMBER_ALIASES:
         return ROW_NUMBER_KEY
+    if not (key_field or "").strip() \
+            and rows_a is not None and rows_b is not None \
+            and len(rows_a) == 1 and len(rows_b) == 1:
+        return ROW_NUMBER_KEY  # 单行直比:无须对齐
     key = resolve_key_field(cols_a, key_field)
     if key not in cols_b:
         raise ValueError(
@@ -150,7 +159,7 @@ def compare_results(
     - 仅一侧存在的 key：产生一行「(整行)」摘要记录。
     """
     excluded = set(excluded_fields or [])
-    key = resolve_compare_key(cols_a, cols_b, key_field)
+    key = resolve_compare_key(cols_a, cols_b, key_field, rows_a, rows_b)
     row_number_mode = key == ROW_NUMBER_KEY
 
     common_cols = [c for c in cols_a if c in cols_b and c != key and c not in excluded]

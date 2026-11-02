@@ -100,6 +100,17 @@ res_d = compare_results(["id", "a", "b"], [(1, "x", "y")], ["id", "a", "b"], [(2
 dig = [r for r in res_d.rows if r.status == STATUS_ONLY_A][0].a_value
 check("整行摘要只含参与字段", "a=x" in dig and "b=" not in dig)
 
+# ── 单行直比:留空 + 各 1 行 → 无需 key 直接对比 ──
+res_auto = compare_results(colsP, raP, colsP, rbP_diff, "", [])
+check("单行直比:留空自动生效", res_auto.key_field == "(行号)")
+check("单行直比:全字段对比报差异", res_auto.stats.diff_keys == 1)
+res_auto2 = compare_results(colsP, raP, colsP, rbP_same, "", ["product_id", "price"])
+check("单行直比+过滤:name 一致", res_auto2.stats.same_keys == 1 and res_auto2.stats.diff_keys == 0)
+res_auto3 = compare_results(colsP, raP, colsP, rbP_diff, "", ["product_id", "price"])
+check("单行直比+过滤:name 不同报差异", res_auto3.stats.diff_keys == 1)
+res_multi = compare_results(cols, ra, cols, rb, "", [])
+check("多行留空仍默认第一列", res_multi.key_field == "id")
+
 # ── 全角(行号)别名(中文输入法)──
 res_fw = compare_results(cols, ra, cols, rb, "(行号)", [])
 check("全角(行号)别名生效",

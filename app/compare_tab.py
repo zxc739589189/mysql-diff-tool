@@ -158,7 +158,7 @@ class CompareTab(QWidget):
         meta_bar.addSpacing(12)
         meta_bar.addWidget(QLabel("对齐 key 字段:"))
         self.key_edit = QLineEdit()
-        self.key_edit.setPlaceholderText("留空默认第一列；填 (行号) 按行顺序对比")
+        self.key_edit.setPlaceholderText("留空:仅 1 行时直接对比,多行默认第一列")
         self.key_edit.setFixedWidth(220)
         meta_bar.addWidget(self.key_edit)
         root.addLayout(meta_bar)
@@ -555,9 +555,10 @@ class CompareTab(QWidget):
             self._last_cfg_b.database or "-",
             time.strftime("%H:%M:%S"),
         )
-        cols_a, _rows_a, cols_b, _rows_b = payload
+        cols_a, rows_a, cols_b, rows_b = payload
         try:
-            key = resolve_compare_key(cols_a, cols_b, self.key_edit.text().strip())
+            key = resolve_compare_key(
+                cols_a, cols_b, self.key_edit.text().strip(), rows_a, rows_b)
         except Exception as exc:
             self._set_running(False, "对比失败")
             self._error(str(exc))
