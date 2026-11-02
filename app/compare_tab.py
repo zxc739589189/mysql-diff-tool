@@ -252,8 +252,8 @@ class CompareTab(QWidget):
         fg.addWidget(self.filter_area)
         root.addWidget(filter_group)
 
-        # 对比结论(独立模块:按 key 直接输出哪些字段值不同)
-        self.diff_group = QGroupBox("对比结论(哪些 key 不一样、差在哪些字段)")
+        # 对比结论(独立模块:直接输出哪些字段的值不一样)
+        self.diff_group = QGroupBox("对比结论(哪些字段的值不一样)")
         dg = QVBoxLayout(self.diff_group)
         self.diff_text = QPlainTextEdit()
         self.diff_text.setReadOnly(True)
@@ -730,39 +730,29 @@ class CompareTab(QWidget):
     # ───────────────────────── 对比结论 ─────────────────────────
 
     def _render_diff_overview(self, res: CompareResult):
-        """只输出三项:值不一致 key 数量、具体 key 列表、完全一致 key 数量。
+        """字段口径输出:参与对比的字段里,哪些字段的值不一致。
 
-        统计口径 = 参与对比的字段:被过滤(未勾选)字段上的差异不参与统计,
-        即只差在被过滤字段的 key 会计入「完全一致」。
+        统计口径 = 参与对比(勾选)的字段;某字段在任意一个 key 上值不同即计为不一致。
         """
-        # 每个差异 key 各有多少个 value 不同(res.rows 已只含参与对比字段的差异)
-        diff_count: Dict[object, int] = {}
+        # 在至少一个 key 上值不一致的字段(保持字段顺序)
+        diff_fields: List[str] = []
         for r in res.rows:
-            if r.status == STATUS_DIFF:
-                diff_count[r.key] = diff_count.get(r.key, 0) + 1
+            if r.status == STATUS_DIFF and r.field not in diff_fields:
+                diff_fields.append(r.field)
+        same_field_count = len(res.fields) - len(diff_fields)
 
-        shown_items = list(diff_count.items())[:500]
-        detail = json.dumps({full_text(k): c for k, c in shown_items},
-                            ensure_ascii=False)
-        if len(diff_count) > 500:
-            detail += " …(共 %d 个 key)" % len(diff_count)
+        shown = json.dumps(diff_fields[:500], ensure_ascii=False)
+        if len(diff_fields) > 500:
+            shown += " …(共 %d 个)" % len(diff_fields)
 
         lines: List[str] = []
         if self._stale:
             lines.append("⚠ 输入已修改，以下结果可能过期，请重新点击「开始对比」\n")
-        # 参与对比字段口径(让过滤效果可见)
-        excluded = self._excluded_fields()
         if not res.fields:
             lines.append("⚠ 没有参与对比的字段（所有字段均被过滤），请至少勾选一个字段")
-        elif excluded:
-            lines.append("参与对比的字段: %d 个（已过滤: %s）"
-                         % (len(res.fields), ", ".join(excluded)))
-        else:
-            lines.append("参与对比的字段: %d 个（全部）" % len(res.fields))
-        lines.append("值不一致的 key 数量: %d（共 %d 个 value 不同）"
-                     % (len(diff_count), sum(diff_count.values())))
-        lines.append("各 key 不同的 value 数: %s" % detail)
-        lines.append("完全一致的 key 数量: %d" % res.stats.same_keys)
+        lines.append("值不一致的字段数量: %d" % len(diff_fields))
+        lines.append("值不一致的字段: %s" % shown)
+        lines.append("完全一致的字段数量: %d" % same_field_count)
         self.diff_text.setPlainText("\n".join(lines))
         self.diff_group.setVisible(True)
 
