@@ -118,7 +118,6 @@ class CompareTab(QWidget):
         self._suppress_filter_events = False
         self._data: Optional[Tuple[list, list, list, list]] = None  # 查询结果缓存
         self._result: Optional[CompareResult] = None
-        self._diff_field_filter: Optional[str] = None  # 差异速览中选中的字段
         self._build_ui()
         self._connect_signals()
         self._update_default_config_path()
@@ -250,28 +249,15 @@ class CompareTab(QWidget):
         fg.addWidget(self.filter_area)
         root.addWidget(filter_group)
 
-        # 差异速览(独立模块:一眼看清哪些字段的值不一样)
-        self.diff_group = QGroupBox("差异速览(哪些字段的值不一样)")
+        # 对比结论(独立模块:按 key 直接输出哪些字段值不同)
+        self.diff_group = QGroupBox("对比结论(哪些 key 不一样、差在哪些字段)")
         dg = QVBoxLayout(self.diff_group)
-        self.diff_summary_label = QLabel("执行对比后，这里汇总存在差异的字段")
-        self.diff_summary_label.setTextFormat(Qt.RichText)
-        dg.addWidget(self.diff_summary_label)
-        self.diff_table = QTableWidget(0, 3)
-        self.diff_table.setHorizontalHeaderLabels(["字段名", "不一致 key 数", "不一致的 key"])
-        d_header = self.diff_table.horizontalHeader()
-        d_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        d_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        d_header.setSectionResizeMode(2, QHeaderView.Stretch)
-        self.diff_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.diff_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.diff_table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.diff_table.verticalHeader().setVisible(False)
-        self.diff_table.setMaximumHeight(110)
-        self.diff_table.itemClicked.connect(self._on_diff_field_clicked)
-        dg.addWidget(self.diff_table)
-        diff_hint = QLabel("点击字段行 → 下方结果表只看该字段的差异值；再次点击取消")
-        diff_hint.setStyleSheet("color: gray;")
-        dg.addWidget(diff_hint)
+        self.diff_text = QPlainTextEdit()
+        self.diff_text.setReadOnly(True)
+        self.diff_text.setFont(mono)
+        self.diff_text.setMaximumHeight(150)
+        self.diff_text.setPlaceholderText("执行对比后，这里直接输出结论")
+        dg.addWidget(self.diff_text)
         self.diff_group.setVisible(False)  # 首次对比出结果后显示
         root.addWidget(self.diff_group)
 
@@ -554,7 +540,6 @@ class CompareTab(QWidget):
         # 字段复选框 = 两侧结果列的并集（保持 A 的列顺序），去掉 key
         fields = [c for c in dict.fromkeys(list(cols_a) + list(cols_b)) if c != key]
         self._rebuild_checkboxes(fields)
-        self._diff_field_filter = None
         self._set_running(False, "查询完成，正在对比…")
         self._recompute()
 
@@ -672,10 +657,6 @@ class CompareTab(QWidget):
 
         _text, keep = FILTER_OPTIONS[self.result_filter.currentIndex()]
         rows = res.rows if keep is None else [r for r in res.rows if r.status in keep]
-        if self._diff_field_filter is not None:
-            # 差异速览联动:只看选中字段的差异行
-            rows = [r for r in rows
-                    if r.field == self._diff_field_filter and r.status == STATUS_DIFF]
         total = len(rows)
         shown = rows[:MAX_DISPLAY_ROWS]
 
@@ -697,76 +678,60 @@ class CompareTab(QWidget):
                 item.setToolTip(full_text(raw_values[j]))
                 self.table.setItem(i, j, item)
 
-        prefix = ""
-        if self._diff_field_filter is not None:
-            prefix = "已按字段 “%s” 筛选差异，" % self._diff_field_filter
         if total > len(shown):
             self.result_count.setText(
-                "%s共 %d 条记录，仅显示前 %d 条" % (prefix, total, len(shown))
+                "共 %d 条记录，仅显示前 %d 条" % (total, len(shown))
             )
         else:
-            self.result_count.setText("%s共 %d 条记录" % (prefix, total))
+            self.result_count.setText("共 %d 条记录" % total)
 
-    # ───────────────────────── 差异速览 ─────────────────────────
+    # ───────────────────────── 对比结论 ─────────────────────────
 
     def _render_diff_overview(self, res: CompareResult):
-        """按字段聚合「值不一致」，一眼看清哪些字段不同、各自多少 key 不一致。"""
-        agg: Dict[str, dict] = {}
+        """按 key 直接输出结论:哪些 key 不一样、各差在哪些字段。
+
+        纯文本输出,测试一眼看清有几个 key 出问题,再去下方结果表核对具体值。
+        """
+        s = res.stats
+        # 按 key 聚合差异字段(保持出现顺序)
+        diff_map: Dict[object, List[str]] = {}
         for r in res.rows:
-            if r.status != STATUS_DIFF:
-                continue
-            entry = agg.setdefault(r.field, {"count": 0, "keys": []})
-            entry["count"] += 1
-            entry["keys"].append(full_text(r.key))
+            if r.status == STATUS_DIFF:
+                fields = diff_map.setdefault(r.key, [])
+                if r.field not in fields:
+                    fields.append(r.field)
 
-        self.diff_group.setVisible(True)
-        if not agg:
-            self.diff_summary_label.setText("共同 key 的参与对比字段全部一致 ✅")
-            self.diff_table.setRowCount(0)
-            self.diff_table.setVisible(False)
-            self._diff_field_filter = None
-            return
-
-        self.diff_table.setVisible(True)
-        total = sum(e["count"] for e in agg.values())
-        self.diff_summary_label.setText(
-            "<b>%d</b> 个字段存在差异（共 %d 处）: %s"
-            % (len(agg), total, "、".join(
-                "%s(%d)" % (f, e["count"]) for f, e in agg.items()))
-        )
-        self.diff_table.setRowCount(len(agg))
-        for i, (f, e) in enumerate(agg.items()):
-            keys = e["keys"]
-            shown_keys = ", ".join(keys[:20])
-            if len(keys) > 20:
-                shown_keys += " … 共 %d 个" % len(keys)
-            for j, text in enumerate((f, str(e["count"]), shown_keys)):
-                item = QTableWidgetItem(text)
-                if j == 0:
-                    item.setForeground(STATUS_FG[STATUS_DIFF])
-                    font = item.font()
-                    font.setBold(True)
-                    item.setFont(font)
-                item.setToolTip(text)
-                self.diff_table.setItem(i, j, item)
-
-        # 当前筛选字段若已不在差异中（如重新对比/改过滤），自动取消筛选
-        if self._diff_field_filter is not None and self._diff_field_filter not in agg:
-            self._diff_field_filter = None
-            self.diff_table.clearSelection()
-
-    def _on_diff_field_clicked(self, item):
-        """点击差异字段:下方结果表只看该字段的差异值;再次点击取消。"""
-        field_item = self.diff_table.item(item.row(), 0)
-        if field_item is None:
-            return
-        field = field_item.text()
-        if self._diff_field_filter == field:
-            self._diff_field_filter = None
-            self.diff_table.clearSelection()
+        lines: List[str] = []
+        if diff_map:
+            lines.append("■ 值不一致的 key 共 %d 个:" % len(diff_map))
+            for i, (k, fields) in enumerate(diff_map.items()):
+                if i >= 50:
+                    lines.append("    …(其余省略,共 %d 个)" % len(diff_map))
+                    break
+                lines.append("    %s    不同字段: %s"
+                             % (full_text(k), "、".join(fields)))
         else:
-            self._diff_field_filter = field
-        self._render_result()
+            lines.append("■ 值不一致的 key: 无(共同 key 的参与对比字段全部一致)")
+
+        only_a = [full_text(r.key) for r in res.rows if r.status == STATUS_ONLY_A]
+        only_b = [full_text(r.key) for r in res.rows if r.status == STATUS_ONLY_B]
+        lines.append("■ 仅 A 存在的 key 共 %d 个%s"
+                     % (s.only_a_keys, self._key_list_text(only_a)))
+        lines.append("■ 仅 B 存在的 key 共 %d 个%s"
+                     % (s.only_b_keys, self._key_list_text(only_b)))
+        lines.append("■ 完全一致的 key 共 %d 个" % s.same_keys)
+
+        self.diff_text.setPlainText("\n".join(lines))
+        self.diff_group.setVisible(True)
+
+    @staticmethod
+    def _key_list_text(keys: List[str], limit: int = 30) -> str:
+        if not keys:
+            return ""
+        shown = ", ".join(keys[:limit])
+        if len(keys) > limit:
+            shown += " …"
+        return ": " + shown
 
     # ───────────────────────── 结果选中复制 ─────────────────────────
 
