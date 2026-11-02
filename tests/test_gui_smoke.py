@@ -134,6 +134,17 @@ check("key 改为(行号)立即重算",
 tab2.key_edit.setText("(行号)")  # 全角括号同样生效
 tab2._on_key_changed()
 check("全角(行号)立即重算", tab2._result.key_field == "(行号)")
+# 共同 key 为 0 时必须警告"没有配对对比",且一致字段不得虚报
+tab2._on_query_done((cols, [(1, "a", 10)], cols, [(4, "d", 40)]))
+tab2.key_edit.setText("id")
+tab2._on_key_changed()
+warn_text = tab2.diff_text.toPlainText()
+check("key 对不上时明确警告未对比",
+      "共同 key 为 0" in warn_text and "没有进行 value 对比" in warn_text)
+check("未参与对比的字段不计入一致", "完全一致的字段数量: 0" in warn_text)
+tab2._on_query_done((cols, ra, cols, rb))  # 恢复数据
+tab2.key_edit.setText("")
+tab2._on_key_changed()
 tab2.sql_a.setPlainText("select 1 -- 修改了 SQL")
 check("修改 SQL 后提示结果过期",
       "可能过期" in tab2.run_status.text() and "可能过期" in tab2.diff_text.toPlainText())

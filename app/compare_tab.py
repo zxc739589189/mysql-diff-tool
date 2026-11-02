@@ -750,12 +750,19 @@ class CompareTab(QWidget):
 
         统计口径 = 参与对比(勾选)的字段;某字段在任意一个 key 上值不同即计为不一致。
         """
-        # 在至少一个 key 上值不一致的字段(保持字段顺序)
-        diff_fields: List[str] = []
+        # 字段口径统计:以「实际参与过对比」为准
+        # - 不一致字段: 至少一个 key 上值不同
+        # - 一致字段:   至少一个 key 上比过且全部相同(没比过的不算一致)
+        diff_set = set()
+        same_set = set()
         for r in res.rows:
-            if r.status == STATUS_DIFF and r.field not in diff_fields:
-                diff_fields.append(r.field)
-        same_field_count = len(res.fields) - len(diff_fields)
+            if r.status == STATUS_DIFF:
+                diff_set.add(r.field)
+            elif r.status == STATUS_SAME:
+                same_set.add(r.field)
+        diff_fields = [f for f in res.fields if f in diff_set]  # 保持字段顺序
+        same_field_count = len([f for f in res.fields
+                                if f in same_set and f not in diff_set])
 
         shown = json.dumps(diff_fields[:500], ensure_ascii=False)
         if len(diff_fields) > 500:
@@ -766,6 +773,14 @@ class CompareTab(QWidget):
             lines.append("⚠ 输入已修改，以下结果可能过期，请重新点击「开始对比」\n")
         if not res.fields:
             lines.append("⚠ 没有参与对比的字段（所有字段均被过滤），请至少勾选一个字段")
+        elif res.stats.common_keys == 0:
+            # 行根本没配成对,0 差异 ≠ 值相同
+            lines.append(
+                "⚠ 共同 key 为 0：两边的行没有配成对，实际没有进行 value 对比！")
+            lines.append(
+                "  （仅 A 存在 %d 个 key、仅 B 存在 %d 个 key。"
+                "想让第 1 行对第 1 行直接比，对齐 key 请填 （行号））"
+                % (res.stats.only_a_keys, res.stats.only_b_keys))
         lines.append("值不一致的字段数量: %d" % len(diff_fields))
         lines.append("值不一致的字段: %s" % shown)
         lines.append("完全一致的字段数量: %d" % same_field_count)
