@@ -20,6 +20,10 @@ STATUS_TEXT = {
 
 WHOLE_ROW = "(整行)"
 
+# 特殊 key:按行号对齐（不依赖任何 key 列，第 1 行对第 1 行）
+ROW_NUMBER_KEY = "(行号)"
+_ROW_NUMBER_ALIASES = {ROW_NUMBER_KEY, "行号"}
+
 
 @dataclass
 class DiffRow:
@@ -99,11 +103,34 @@ def _index_rows(
     return mapping, order, duplicates
 
 
-def _row_digest(columns: Sequence[str], row: tuple) -> str:
-    """整行内容的完整摘要（不截断），用于「仅 A/B 存在」的展示。"""
+def resolve_compare_key(
+    cols_a: Sequence[str], cols_b: Sequence[str], key_field: str
+) -> str:
+    """确定对齐 key。
+
+    - 填 ``(行号)``（或 ``行号``）: 按行顺序对齐，不需要任何 key 列；
+    - 留空: 取 A 结果第一列；
+    - 否则校验该列在两侧结果中都存在。
+    """
+    if (key_field or "").strip() in _ROW_NUMBER_ALIASES:
+        return ROW_NUMBER_KEY
+    key = resolve_key_field(cols_a, key_field)
+    if key not in cols_b:
+        raise ValueError(
+            "对齐 key 字段 “%s” 不在数据源 B 的查询结果列中，可选列: %s"
+            % (key, ", ".join(cols_b))
+        )
+    return key
+
+
+def _row_digest(fields: Sequence[str], idxs: Sequence[int], row: tuple) -> str:
+    """整行摘要（只含参与对比的字段，完整不截断），用于「仅 A/B 存在」的展示。"""
+    if not fields:
+        return "(所有字段均被过滤)"
     parts = []
-    for c, v in zip(columns, row):
-        parts.append("%s=%s" % (c, "NULL" if v is None else v))
+    for f, i in zip(fields, idxs):
+        v = row[i]
+        parts.append("%s=%s" % (f, "NULL" if v is None else v))
     return ", ".join(parts)
 
 
@@ -122,19 +149,23 @@ def compare_results(
     - 仅一侧存在的 key：产生一行「(整行)」摘要记录。
     """
     excluded = set(excluded_fields or [])
-    key = resolve_key_field(cols_a, key_field)
-    if key not in cols_b:
-        raise ValueError(
-            "对齐 key 字段 “%s” 不在数据源 B 的查询结果列中，可选列: %s"
-            % (key, ", ".join(cols_b))
-        )
+    key = resolve_compare_key(cols_a, cols_b, key_field)
+    row_number_mode = key == ROW_NUMBER_KEY
 
     common_cols = [c for c in cols_a if c in cols_b and c != key and c not in excluded]
     idx_a = [cols_a.index(c) for c in common_cols]
     idx_b = [cols_b.index(c) for c in common_cols]
 
-    map_a, order_a, dup_a = _index_rows(cols_a, rows_a, key)
-    map_b, order_b, dup_b = _index_rows(cols_b, rows_b, key)
+    if row_number_mode:
+        # 按行号对齐:第 1 行对第 1 行,多出的行算「仅 A/B 存在」
+        order_a = list(range(1, len(rows_a) + 1))
+        order_b = list(range(1, len(rows_b) + 1))
+        map_a = dict(zip(order_a, rows_a))
+        map_b = dict(zip(order_b, rows_b))
+        dup_a = dup_b = 0
+    else:
+        map_a, order_a, dup_a = _index_rows(cols_a, rows_a, key)
+        map_b, order_b, dup_b = _index_rows(cols_b, rows_b, key)
 
     result = CompareResult(key_field=key, fields=list(common_cols))
     stats = result.stats
@@ -180,11 +211,11 @@ def compare_results(
 
     for k in only_a_keys:
         result.rows.append(
-            DiffRow(k, WHOLE_ROW, _row_digest(cols_a, map_a[k]), "—", STATUS_ONLY_A)
+            DiffRow(k, WHOLE_ROW, _row_digest(common_cols, idx_a, map_a[k]), "—", STATUS_ONLY_A)
         )
     for k in only_b_keys:
         result.rows.append(
-            DiffRow(k, WHOLE_ROW, "—", _row_digest(cols_b, map_b[k]), STATUS_ONLY_B)
+            DiffRow(k, WHOLE_ROW, "—", _row_digest(common_cols, idx_b, map_b[k]), STATUS_ONLY_B)
         )
 
     return result

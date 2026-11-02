@@ -46,7 +46,7 @@ from .compare import (
     STATUS_TEXT,
     CompareResult,
     compare_results,
-    resolve_key_field,
+    resolve_compare_key,
 )
 from .config import (
     DataSourceConfig,
@@ -152,7 +152,7 @@ class CompareTab(QWidget):
         meta_bar.addSpacing(12)
         meta_bar.addWidget(QLabel("对齐 key 字段:"))
         self.key_edit = QLineEdit()
-        self.key_edit.setPlaceholderText("留空默认结果第一列")
+        self.key_edit.setPlaceholderText("留空默认第一列；填 (行号) 按行顺序对比")
         self.key_edit.setFixedWidth(220)
         meta_bar.addWidget(self.key_edit)
         root.addLayout(meta_bar)
@@ -520,11 +520,7 @@ class CompareTab(QWidget):
         self._data = payload
         cols_a, _rows_a, cols_b, _rows_b = payload
         try:
-            key = resolve_key_field(cols_a, self.key_edit.text().strip())
-            if key not in cols_b:
-                raise ValueError(
-                    "对齐 key 字段 “%s” 不在数据源 B 的查询结果列中" % key
-                )
+            key = resolve_compare_key(cols_a, cols_b, self.key_edit.text().strip())
         except Exception as exc:
             self._set_running(False, "对比失败")
             self._error(str(exc))

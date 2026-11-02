@@ -81,6 +81,25 @@ check("重复 key 产生警告", len(res6.warnings) == 1 and "重复" in res6.wa
 res7 = compare_results(["id", "a_col"], [(1, 2)], ["id", "b_col"], [(1, 2)], "id", [])
 check("仅单侧存在的列产生警告", len(res7.warnings) == 2)
 
+# ── 行号对齐模式(不同 key 的行也能逐字段对比)──
+colsP = ["product_id", "product_name", "price"]
+raP = [("1035152538031984640", "苹果手机", 5)]
+rbP_same = [("1035497657629249536", "苹果手机", 6)]
+rbP_diff = [("1035497657629249536", "香蕉", 6)]
+res_rn = compare_results(colsP, raP, colsP, rbP_same, "(行号)", ["product_id", "price"])
+check("行号模式:不同 id 的行也能对比", res_rn.stats.common_keys == 1)
+check("行号模式:只比 product_name 且一致",
+      res_rn.stats.same_keys == 1 and res_rn.fields == ["product_name"])
+res_rn2 = compare_results(colsP, raP, colsP, rbP_diff, "(行号)", ["product_id", "price"])
+check("行号模式:名称不同则报差异", res_rn2.stats.diff_keys == 1)
+res_rn3 = compare_results(colsP, raP * 2, colsP, rbP_same, "(行号)", [])
+check("行号模式:A 多出的行记为仅 A", res_rn3.stats.only_a_keys == 1)
+
+# ── 整行摘要尊重字段过滤(不再倒出所有字段)──
+res_d = compare_results(["id", "a", "b"], [(1, "x", "y")], ["id", "a", "b"], [(2, "x", "y")], "id", ["b"])
+dig = [r for r in res_d.rows if r.status == STATUS_ONLY_A][0].a_value
+check("整行摘要只含参与字段", "a=x" in dig and "b=" not in dig)
+
 # ── 配置读写 ──
 tmp = tempfile.mkdtemp()
 cfg = TabConfig(
