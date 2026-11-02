@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Qt, Signal
@@ -120,6 +121,9 @@ class CompareTab(QWidget):
         self._data: Optional[Tuple[list, list, list, list]] = None  # 查询结果缓存
         self._result: Optional[CompareResult] = None
         self._stale = False  # SQL/连接信息在对比后被修改,结果已过期
+        self._last_cfg_a = DataSourceConfig()  # 最近一次实际执行的数据源
+        self._last_cfg_b = DataSourceConfig()
+        self._last_run_info = ""               # 最近一次实际执行的描述
         self._build_ui()
         self._connect_signals()
         self._update_default_config_path()
@@ -519,6 +523,8 @@ class CompareTab(QWidget):
             return
 
         self._clear_results()  # 先清空旧结果,避免过期数字误导
+        self._last_cfg_a = cfg_a  # 记录本次实际执行用的连接信息
+        self._last_cfg_b = cfg_b
         self._set_running(True, "开始查询…")
 
         def job(progress):
@@ -542,6 +548,13 @@ class CompareTab(QWidget):
         """查询成功（主线程）：缓存结果、构建字段过滤、执行对比。"""
         self._data = payload
         self._stale = False
+        self._last_run_info = "数据源: A=%s:%s/%s  B=%s:%s/%s  查询时间: %s" % (
+            self._last_cfg_a.host, self._last_cfg_a.port,
+            self._last_cfg_a.database or "-",
+            self._last_cfg_b.host, self._last_cfg_b.port,
+            self._last_cfg_b.database or "-",
+            time.strftime("%H:%M:%S"),
+        )
         cols_a, _rows_a, cols_b, _rows_b = payload
         try:
             key = resolve_compare_key(cols_a, cols_b, self.key_edit.text().strip())
@@ -650,7 +663,8 @@ class CompareTab(QWidget):
             suffix = ""
             if self._result.warnings:
                 suffix = "（" + "；".join(self._result.warnings) + "）"
-            self.run_status.setText("对比完成 " + suffix)
+            self.run_status.setText(
+                "对比完成 %s %s" % (time.strftime("%H:%M:%S"), suffix))
             self.run_status.setStyleSheet("color: gray;")
         self.run_status.setToolTip("\n".join(self._result.warnings))
         self._render_result()
@@ -670,8 +684,10 @@ class CompareTab(QWidget):
             self._recompute()
 
     def _clear_results(self):
-        """开始新查询前清空旧结果展示。"""
+        """开始新查询前清空旧结果与旧数据缓存。"""
         self._result = None
+        self._data = None  # 一并清空,防止查询失败后用旧数据重算
+        self._last_run_info = ""
         self.table.setRowCount(0)
         self.result_count.setText("")
         self.diff_text.clear()
@@ -753,6 +769,10 @@ class CompareTab(QWidget):
         lines.append("值不一致的字段数量: %d" % len(diff_fields))
         lines.append("值不一致的字段: %s" % shown)
         lines.append("完全一致的字段数量: %d" % same_field_count)
+        if self._last_run_info:
+            # 自证:实际查询的是哪两个库、什么时间查的
+            lines.append("")
+            lines.append(self._last_run_info)
         self.diff_text.setPlainText("\n".join(lines))
         self.diff_group.setVisible(True)
 
