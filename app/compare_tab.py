@@ -735,18 +735,17 @@ class CompareTab(QWidget):
         统计口径 = 参与对比的字段:被过滤(未勾选)字段上的差异不参与统计,
         即只差在被过滤字段的 key 会计入「完全一致」。
         """
-        # 差异 key(去重、保持出现顺序);res.rows 本身已只含参与对比字段的差异
-        diff_keys: List[object] = []
-        seen = set()
+        # 每个差异 key 各有多少个 value 不同(res.rows 已只含参与对比字段的差异)
+        diff_count: Dict[object, int] = {}
         for r in res.rows:
-            if r.status == STATUS_DIFF and r.key not in seen:
-                seen.add(r.key)
-                diff_keys.append(r.key)
+            if r.status == STATUS_DIFF:
+                diff_count[r.key] = diff_count.get(r.key, 0) + 1
 
-        shown = [full_text(k) for k in diff_keys[:500]]
-        key_list = json.dumps(shown, ensure_ascii=False)
-        if len(diff_keys) > 500:
-            key_list += " …(共 %d 个)" % len(diff_keys)
+        shown_items = list(diff_count.items())[:500]
+        detail = json.dumps({full_text(k): c for k, c in shown_items},
+                            ensure_ascii=False)
+        if len(diff_count) > 500:
+            detail += " …(共 %d 个 key)" % len(diff_count)
 
         lines: List[str] = []
         if self._stale:
@@ -760,8 +759,9 @@ class CompareTab(QWidget):
                          % (len(res.fields), ", ".join(excluded)))
         else:
             lines.append("参与对比的字段: %d 个（全部）" % len(res.fields))
-        lines.append("值不一致的 key 数量: %d" % len(diff_keys))
-        lines.append("值不一致的 key 列表: %s" % key_list)
+        lines.append("值不一致的 key 数量: %d（共 %d 个 value 不同）"
+                     % (len(diff_count), sum(diff_count.values())))
+        lines.append("各 key 不同的 value 数: %s" % detail)
         lines.append("完全一致的 key 数量: %d" % res.stats.same_keys)
         self.diff_text.setPlainText("\n".join(lines))
         self.diff_group.setVisible(True)

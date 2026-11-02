@@ -115,14 +115,15 @@ check("整行摘要不截断", long_val in copied_digest)
 tab2._on_query_done((cols, ra, cols, rb))  # 恢复 3 产品数据集
 tab2._checkboxes["price"].setChecked(True)  # 固定过滤使 price 默认不勾,先勾上
 conclusion = tab2.diff_text.toPlainText()
-check("结论:不一致 key 数量", "值不一致的 key 数量: 1" in conclusion)
-check("结论:不一致 key 具体列表", '值不一致的 key 列表: ["2"]' in conclusion)
+check("结论:不一致 key 数量及 value 总数",
+      "值不一致的 key 数量: 1（共 1 个 value 不同）" in conclusion)
+check("结论:各 key 不同的 value 数", '各 key 不同的 value 数: {"2": 1}' in conclusion)
 check("结论:一致 key 数量", "完全一致的 key 数量: 1" in conclusion)
 tab2._checkboxes["price"].setChecked(False)  # 过滤 price → 其差异不参与统计
 conclusion2 = tab2.diff_text.toPlainText()
 check("被过滤字段的差异不计入不一致 key",
       "值不一致的 key 数量: 0" in conclusion2
-      and '值不一致的 key 列表: []' in conclusion2)
+      and '各 key 不同的 value 数: {}' in conclusion2)
 check("只差在被过滤字段的 key 计入完全一致", "完全一致的 key 数量: 2" in conclusion2)
 tab2._checkboxes["price"].setChecked(True)
 
