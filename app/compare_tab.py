@@ -118,6 +118,7 @@ class CompareTab(QWidget):
         self._suppress_filter_events = False
         self._data: Optional[Tuple[list, list, list, list]] = None  # 查询结果缓存
         self._result: Optional[CompareResult] = None
+        self._diff_field_filter: Optional[str] = None  # 差异速览中选中的字段
         self._build_ui()
         self._connect_signals()
         self._update_default_config_path()
@@ -248,6 +249,31 @@ class CompareTab(QWidget):
         self.filter_area.setWidget(self.filter_host)
         fg.addWidget(self.filter_area)
         root.addWidget(filter_group)
+
+        # 差异速览(独立模块:一眼看清哪些字段的值不一样)
+        self.diff_group = QGroupBox("差异速览(哪些字段的值不一样)")
+        dg = QVBoxLayout(self.diff_group)
+        self.diff_summary_label = QLabel("执行对比后，这里汇总存在差异的字段")
+        self.diff_summary_label.setTextFormat(Qt.RichText)
+        dg.addWidget(self.diff_summary_label)
+        self.diff_table = QTableWidget(0, 3)
+        self.diff_table.setHorizontalHeaderLabels(["字段名", "不一致 key 数", "不一致的 key"])
+        d_header = self.diff_table.horizontalHeader()
+        d_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        d_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        d_header.setSectionResizeMode(2, QHeaderView.Stretch)
+        self.diff_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.diff_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.diff_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.diff_table.verticalHeader().setVisible(False)
+        self.diff_table.setMaximumHeight(110)
+        self.diff_table.itemClicked.connect(self._on_diff_field_clicked)
+        dg.addWidget(self.diff_table)
+        diff_hint = QLabel("点击字段行 → 下方结果表只看该字段的差异值；再次点击取消")
+        diff_hint.setStyleSheet("color: gray;")
+        dg.addWidget(diff_hint)
+        self.diff_group.setVisible(False)  # 首次对比出结果后显示
+        root.addWidget(self.diff_group)
 
         # 结果过滤栏
         res_bar = QHBoxLayout()
@@ -528,6 +554,7 @@ class CompareTab(QWidget):
         # 字段复选框 = 两侧结果列的并集（保持 A 的列顺序），去掉 key
         fields = [c for c in dict.fromkeys(list(cols_a) + list(cols_b)) if c != key]
         self._rebuild_checkboxes(fields)
+        self._diff_field_filter = None
         self._set_running(False, "查询完成，正在对比…")
         self._recompute()
 
@@ -641,8 +668,14 @@ class CompareTab(QWidget):
         self._set_stat("diff", "有差异 key", s.diff_keys)
         self._set_stat("same", "完全一致 key", s.same_keys)
 
+        self._render_diff_overview(res)
+
         _text, keep = FILTER_OPTIONS[self.result_filter.currentIndex()]
         rows = res.rows if keep is None else [r for r in res.rows if r.status in keep]
+        if self._diff_field_filter is not None:
+            # 差异速览联动:只看选中字段的差异行
+            rows = [r for r in rows
+                    if r.field == self._diff_field_filter and r.status == STATUS_DIFF]
         total = len(rows)
         shown = rows[:MAX_DISPLAY_ROWS]
 
@@ -664,12 +697,76 @@ class CompareTab(QWidget):
                 item.setToolTip(full_text(raw_values[j]))
                 self.table.setItem(i, j, item)
 
+        prefix = ""
+        if self._diff_field_filter is not None:
+            prefix = "已按字段 “%s” 筛选差异，" % self._diff_field_filter
         if total > len(shown):
             self.result_count.setText(
-                "共 %d 条记录，仅显示前 %d 条" % (total, len(shown))
+                "%s共 %d 条记录，仅显示前 %d 条" % (prefix, total, len(shown))
             )
         else:
-            self.result_count.setText("共 %d 条记录" % total)
+            self.result_count.setText("%s共 %d 条记录" % (prefix, total))
+
+    # ───────────────────────── 差异速览 ─────────────────────────
+
+    def _render_diff_overview(self, res: CompareResult):
+        """按字段聚合「值不一致」，一眼看清哪些字段不同、各自多少 key 不一致。"""
+        agg: Dict[str, dict] = {}
+        for r in res.rows:
+            if r.status != STATUS_DIFF:
+                continue
+            entry = agg.setdefault(r.field, {"count": 0, "keys": []})
+            entry["count"] += 1
+            entry["keys"].append(full_text(r.key))
+
+        self.diff_group.setVisible(True)
+        if not agg:
+            self.diff_summary_label.setText("共同 key 的参与对比字段全部一致 ✅")
+            self.diff_table.setRowCount(0)
+            self.diff_table.setVisible(False)
+            self._diff_field_filter = None
+            return
+
+        self.diff_table.setVisible(True)
+        total = sum(e["count"] for e in agg.values())
+        self.diff_summary_label.setText(
+            "<b>%d</b> 个字段存在差异（共 %d 处）: %s"
+            % (len(agg), total, "、".join(
+                "%s(%d)" % (f, e["count"]) for f, e in agg.items()))
+        )
+        self.diff_table.setRowCount(len(agg))
+        for i, (f, e) in enumerate(agg.items()):
+            keys = e["keys"]
+            shown_keys = ", ".join(keys[:20])
+            if len(keys) > 20:
+                shown_keys += " … 共 %d 个" % len(keys)
+            for j, text in enumerate((f, str(e["count"]), shown_keys)):
+                item = QTableWidgetItem(text)
+                if j == 0:
+                    item.setForeground(STATUS_FG[STATUS_DIFF])
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
+                item.setToolTip(text)
+                self.diff_table.setItem(i, j, item)
+
+        # 当前筛选字段若已不在差异中（如重新对比/改过滤），自动取消筛选
+        if self._diff_field_filter is not None and self._diff_field_filter not in agg:
+            self._diff_field_filter = None
+            self.diff_table.clearSelection()
+
+    def _on_diff_field_clicked(self, item):
+        """点击差异字段:下方结果表只看该字段的差异值;再次点击取消。"""
+        field_item = self.diff_table.item(item.row(), 0)
+        if field_item is None:
+            return
+        field = field_item.text()
+        if self._diff_field_filter == field:
+            self._diff_field_filter = None
+            self.diff_table.clearSelection()
+        else:
+            self._diff_field_filter = field
+        self._render_result()
 
     # ───────────────────────── 结果选中复制 ─────────────────────────
 

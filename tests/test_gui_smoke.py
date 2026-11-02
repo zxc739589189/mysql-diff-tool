@@ -111,6 +111,26 @@ tab2.table.selectAll()
 copied_digest = tab2.copy_selection()
 check("整行摘要不截断", long_val in copied_digest)
 
+# ── 差异速览模块 ──
+tab2._on_query_done((cols, ra, cols, rb))  # 恢复 3 产品数据集
+tab2._checkboxes["price"].setChecked(True)  # 固定过滤使 price 默认不勾,先勾上
+tab2.result_filter.setCurrentIndex(0)      # 全部
+check("差异速览聚合成 1 个差异字段",
+      tab2.diff_table.rowCount() == 1
+      and tab2.diff_table.item(0, 0).text() == "price"
+      and tab2.diff_table.item(0, 1).text() == "1")
+check("速览汇总文案", "个字段存在差异" in tab2.diff_summary_label.text())
+tab2._on_diff_field_clicked(tab2.diff_table.item(0, 0))
+check("点击差异字段→主表只看该字段差异",
+      tab2.table.rowCount() == 1 and tab2.table.item(0, 1).text() == "price")
+tab2._on_diff_field_clicked(tab2.diff_table.item(0, 0))  # 再次点击取消
+check("再次点击取消字段筛选", tab2.table.rowCount() == 6)
+tab2._checkboxes["price"].setChecked(False)  # 过滤掉 price → 无差异
+check("无差异时速览提示全部一致",
+      "全部一致" in tab2.diff_summary_label.text()
+      and tab2.diff_table.rowCount() == 0)
+tab2._checkboxes["price"].setChecked(True)
+
 # ── 复制 A 的 SQL 到 B ──
 tab2.sql_a.setPlainText("SELECT * FROM t WHERE env='A'")
 tab2.btn_copy_ab.click()
