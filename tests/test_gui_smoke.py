@@ -126,6 +126,22 @@ check("被过滤字段的差异不计入不一致 key",
 check("只差在被过滤字段的 key 计入完全一致", "完全一致的 key 数量: 2" in conclusion2)
 tab2._checkboxes["price"].setChecked(True)
 
+# ── key 修改即时重算 + 结果过期提示 ──
+tab2.key_edit.setText("(行号)")
+tab2._on_key_changed()
+check("key 改为(行号)立即重算",
+      tab2._result.key_field == "(行号)" and tab2._result.stats.diff_keys == 2)
+tab2.key_edit.setText("(行号)")  # 全角括号同样生效
+tab2._on_key_changed()
+check("全角(行号)立即重算", tab2._result.key_field == "(行号)")
+tab2.sql_a.setPlainText("select 1 -- 修改了 SQL")
+check("修改 SQL 后提示结果过期",
+      "可能过期" in tab2.run_status.text() and "可能过期" in tab2.diff_text.toPlainText())
+tab2._on_query_done((cols, ra, cols, rb))  # 重新查询 → 过期标记清除
+check("重新对比后过期提示清除", "可能过期" not in tab2.diff_text.toPlainText())
+check("结论含参与对比字段口径", "参与对比的字段" in tab2.diff_text.toPlainText())
+tab2.key_edit.setText("")
+
 # ── 复制 A 的 SQL 到 B ──
 tab2.sql_a.setPlainText("SELECT * FROM t WHERE env='A'")
 tab2.btn_copy_ab.click()

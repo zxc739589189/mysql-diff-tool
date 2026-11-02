@@ -22,7 +22,8 @@ WHOLE_ROW = "(整行)"
 
 # 特殊 key:按行号对齐（不依赖任何 key 列，第 1 行对第 1 行）
 ROW_NUMBER_KEY = "(行号)"
-_ROW_NUMBER_ALIASES = {ROW_NUMBER_KEY, "行号"}
+# 兼容中文输入法全角括号
+_ROW_NUMBER_ALIASES = {ROW_NUMBER_KEY, "行号", "（行号）"}
 
 
 @dataclass

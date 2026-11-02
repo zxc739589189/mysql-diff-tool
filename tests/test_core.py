@@ -100,6 +100,11 @@ res_d = compare_results(["id", "a", "b"], [(1, "x", "y")], ["id", "a", "b"], [(2
 dig = [r for r in res_d.rows if r.status == STATUS_ONLY_A][0].a_value
 check("整行摘要只含参与字段", "a=x" in dig and "b=" not in dig)
 
+# ── 全角(行号)别名(中文输入法)──
+res_fw = compare_results(cols, ra, cols, rb, "(行号)", [])
+check("全角(行号)别名生效",
+      res_fw.key_field == "(行号)" and res_fw.stats.diff_keys == 2)
+
 # ── 配置读写 ──
 tmp = tempfile.mkdtemp()
 cfg = TabConfig(

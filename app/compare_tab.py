@@ -119,6 +119,7 @@ class CompareTab(QWidget):
         self._suppress_filter_events = False
         self._data: Optional[Tuple[list, list, list, list]] = None  # 查询结果缓存
         self._result: Optional[CompareResult] = None
+        self._stale = False  # SQL/连接信息在对比后被修改,结果已过期
         self._build_ui()
         self._connect_signals()
         self._update_default_config_path()
@@ -224,6 +225,7 @@ class CompareTab(QWidget):
             stats_bar.addWidget(lab)
         stats_bar.addStretch(1)
         root.addLayout(stats_bar)
+        self._stat_names = dict(stat_items)
 
         # 字段过滤区
         filter_group = QGroupBox("字段过滤（取消勾选 = 该字段不参与对比）")
@@ -358,6 +360,13 @@ class CompareTab(QWidget):
         self.result_filter.currentIndexChanged.connect(lambda *_: self._render_result())
         self.task_edit.textChanged.connect(self._on_task_name_changed)
         self.config_path_edit.textEdited.connect(self._on_path_edited)
+        # SQL/连接信息变更 → 标记结果过期;key 变更 → 立即用缓存重算
+        self.sql_a.textChanged.connect(self._mark_results_stale)
+        self.sql_b.textChanged.connect(self._mark_results_stale)
+        self.key_edit.editingFinished.connect(self._on_key_changed)
+        for w in (self.ds_a, self.ds_b):
+            for name in ("host", "port", "user", "password", "database"):
+                w[name].textEdited.connect(self._mark_results_stale)
 
     # ───────────────────────── 配置读写 ─────────────────────────
 
@@ -509,6 +518,7 @@ class CompareTab(QWidget):
             self._warn("请先填写数据源 A / B 的查询 SQL")
             return
 
+        self._clear_results()  # 先清空旧结果,避免过期数字误导
         self._set_running(True, "开始查询…")
 
         def job(progress):
@@ -531,6 +541,7 @@ class CompareTab(QWidget):
     def _on_query_done(self, payload):
         """查询成功（主线程）：缓存结果、构建字段过滤、执行对比。"""
         self._data = payload
+        self._stale = False
         cols_a, _rows_a, cols_b, _rows_b = payload
         try:
             key = resolve_compare_key(cols_a, cols_b, self.key_edit.text().strip())
@@ -631,12 +642,42 @@ class CompareTab(QWidget):
             return
         finally:
             QApplication.restoreOverrideCursor()
-        suffix = ""
-        if self._result.warnings:
-            suffix = "（" + "；".join(self._result.warnings) + "）"
-        self.run_status.setText("对比完成 " + suffix)
+        if self._stale:
+            # 对比后又改过 SQL/连接:明确提示结果过期
+            self.run_status.setText("输入已修改，以下结果可能过期，请重新点击「开始对比」")
+            self.run_status.setStyleSheet("color: #b26a00;")
+        else:
+            suffix = ""
+            if self._result.warnings:
+                suffix = "（" + "；".join(self._result.warnings) + "）"
+            self.run_status.setText("对比完成 " + suffix)
+            self.run_status.setStyleSheet("color: gray;")
         self.run_status.setToolTip("\n".join(self._result.warnings))
         self._render_result()
+
+    def _mark_results_stale(self, *_):
+        """SQL/连接信息被修改:标记结果过期(改 key 不算,会自动重算)。"""
+        if self._result is None:
+            return
+        self._stale = True
+        self.run_status.setText("输入已修改，以下结果可能过期，请重新点击「开始对比」")
+        self.run_status.setStyleSheet("color: #b26a00;")
+        self._render_diff_overview(self._result)  # 结论区顶部同步过期提示
+
+    def _on_key_changed(self):
+        """key 字段修改后立即用缓存数据重新对比(无需重新查询数据库)。"""
+        if self._data is not None:
+            self._recompute()
+
+    def _clear_results(self):
+        """开始新查询前清空旧结果展示。"""
+        self._result = None
+        self.table.setRowCount(0)
+        self.result_count.setText("")
+        self.diff_text.clear()
+        self.diff_group.setVisible(False)
+        for key, lab in self.stat_labels.items():
+            lab.setText("%s: -" % self._stat_names[key])
 
     def _set_stat(self, key: str, label: str, value: int):
         self.stat_labels[key].setText("%s: <b>%d</b>" % (label, value))
@@ -707,11 +748,21 @@ class CompareTab(QWidget):
         if len(diff_keys) > 500:
             key_list += " …(共 %d 个)" % len(diff_keys)
 
-        lines = [
-            "值不一致的 key 数量: %d" % len(diff_keys),
-            "值不一致的 key 列表: %s" % key_list,
-            "完全一致的 key 数量: %d" % res.stats.same_keys,
-        ]
+        lines: List[str] = []
+        if self._stale:
+            lines.append("⚠ 输入已修改，以下结果可能过期，请重新点击「开始对比」\n")
+        # 参与对比字段口径(让过滤效果可见)
+        excluded = self._excluded_fields()
+        if not res.fields:
+            lines.append("⚠ 没有参与对比的字段（所有字段均被过滤），请至少勾选一个字段")
+        elif excluded:
+            lines.append("参与对比的字段: %d 个（已过滤: %s）"
+                         % (len(res.fields), ", ".join(excluded)))
+        else:
+            lines.append("参与对比的字段: %d 个（全部）" % len(res.fields))
+        lines.append("值不一致的 key 数量: %d" % len(diff_keys))
+        lines.append("值不一致的 key 列表: %s" % key_list)
+        lines.append("完全一致的 key 数量: %d" % res.stats.same_keys)
         self.diff_text.setPlainText("\n".join(lines))
         self.diff_group.setVisible(True)
 
