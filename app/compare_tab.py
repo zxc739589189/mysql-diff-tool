@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -688,50 +689,31 @@ class CompareTab(QWidget):
     # ───────────────────────── 对比结论 ─────────────────────────
 
     def _render_diff_overview(self, res: CompareResult):
-        """按 key 直接输出结论:哪些 key 不一样、各差在哪些字段。
+        """只输出三项:值不一致 key 数量、具体 key 列表、完全一致 key 数量。
 
-        纯文本输出,测试一眼看清有几个 key 出问题,再去下方结果表核对具体值。
+        统计口径 = 参与对比的字段:被过滤(未勾选)字段上的差异不参与统计,
+        即只差在被过滤字段的 key 会计入「完全一致」。
         """
-        s = res.stats
-        # 按 key 聚合差异字段(保持出现顺序)
-        diff_map: Dict[object, List[str]] = {}
+        # 差异 key(去重、保持出现顺序);res.rows 本身已只含参与对比字段的差异
+        diff_keys: List[object] = []
+        seen = set()
         for r in res.rows:
-            if r.status == STATUS_DIFF:
-                fields = diff_map.setdefault(r.key, [])
-                if r.field not in fields:
-                    fields.append(r.field)
+            if r.status == STATUS_DIFF and r.key not in seen:
+                seen.add(r.key)
+                diff_keys.append(r.key)
 
-        lines: List[str] = []
-        if diff_map:
-            lines.append("■ 值不一致的 key 共 %d 个:" % len(diff_map))
-            for i, (k, fields) in enumerate(diff_map.items()):
-                if i >= 50:
-                    lines.append("    …(其余省略,共 %d 个)" % len(diff_map))
-                    break
-                lines.append("    %s    不同字段: %s"
-                             % (full_text(k), "、".join(fields)))
-        else:
-            lines.append("■ 值不一致的 key: 无(共同 key 的参与对比字段全部一致)")
+        shown = [full_text(k) for k in diff_keys[:500]]
+        key_list = json.dumps(shown, ensure_ascii=False)
+        if len(diff_keys) > 500:
+            key_list += " …(共 %d 个)" % len(diff_keys)
 
-        only_a = [full_text(r.key) for r in res.rows if r.status == STATUS_ONLY_A]
-        only_b = [full_text(r.key) for r in res.rows if r.status == STATUS_ONLY_B]
-        lines.append("■ 仅 A 存在的 key 共 %d 个%s"
-                     % (s.only_a_keys, self._key_list_text(only_a)))
-        lines.append("■ 仅 B 存在的 key 共 %d 个%s"
-                     % (s.only_b_keys, self._key_list_text(only_b)))
-        lines.append("■ 完全一致的 key 共 %d 个" % s.same_keys)
-
+        lines = [
+            "值不一致的 key 数量: %d" % len(diff_keys),
+            "值不一致的 key 列表: %s" % key_list,
+            "完全一致的 key 数量: %d" % res.stats.same_keys,
+        ]
         self.diff_text.setPlainText("\n".join(lines))
         self.diff_group.setVisible(True)
-
-    @staticmethod
-    def _key_list_text(keys: List[str], limit: int = 30) -> str:
-        if not keys:
-            return ""
-        shown = ", ".join(keys[:limit])
-        if len(keys) > limit:
-            shown += " …"
-        return ": " + shown
 
     # ───────────────────────── 结果选中复制 ─────────────────────────
 

@@ -111,18 +111,19 @@ tab2.table.selectAll()
 copied_digest = tab2.copy_selection()
 check("整行摘要不截断", long_val in copied_digest)
 
-# ── 对比结论模块(按 key 输出)──
+# ── 对比结论模块(不一致 key 数量 + 列表 + 一致数量)──
 tab2._on_query_done((cols, ra, cols, rb))  # 恢复 3 产品数据集
 tab2._checkboxes["price"].setChecked(True)  # 固定过滤使 price 默认不勾,先勾上
 conclusion = tab2.diff_text.toPlainText()
-check("结论输出差异 key 数量", "值不一致的 key 共 1 个" in conclusion)
-check("结论输出 key 名和差异字段", "2    不同字段: price" in conclusion)
-check("结论输出仅A/仅B/一致统计",
-      "仅 A 存在的 key 共 1 个: 3" in conclusion
-      and "仅 B 存在的 key 共 1 个: 4" in conclusion
-      and "完全一致的 key 共 1 个" in conclusion)
-tab2._checkboxes["price"].setChecked(False)  # 过滤掉 price → 无差异
-check("无差异时结论明示", "值不一致的 key: 无" in tab2.diff_text.toPlainText())
+check("结论:不一致 key 数量", "值不一致的 key 数量: 1" in conclusion)
+check("结论:不一致 key 具体列表", '值不一致的 key 列表: ["2"]' in conclusion)
+check("结论:一致 key 数量", "完全一致的 key 数量: 1" in conclusion)
+tab2._checkboxes["price"].setChecked(False)  # 过滤 price → 其差异不参与统计
+conclusion2 = tab2.diff_text.toPlainText()
+check("被过滤字段的差异不计入不一致 key",
+      "值不一致的 key 数量: 0" in conclusion2
+      and '值不一致的 key 列表: []' in conclusion2)
+check("只差在被过滤字段的 key 计入完全一致", "完全一致的 key 数量: 2" in conclusion2)
 tab2._checkboxes["price"].setChecked(True)
 
 # ── 复制 A 的 SQL 到 B ──
